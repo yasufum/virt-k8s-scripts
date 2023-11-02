@@ -10,12 +10,33 @@ libvirtを用いた簡易k8s環境構築ツール。
 マルチノード構成とする場合にはさらにこれを複製する。
 
 雛形のVMを作成するには`virt-install.sh`を実行する。スペックを変更したい場合は
-スクリプト内のパラメータを直接書き換える。
-
-TODO: パラメータは他のスクリプトと共用しているので、外出しの設定ファイルとして分ける。
+`vars.sh`のパラメータを変更する。
 
 ```sh
 bash virt-install.sh
+```
+
+VMが起動されOSインストール画面に移行するため、メニューに従って実行する。
+インストールが完了すると`vars.sh`の`ORIG_VMNAME`で指定した
+名称VMが作成されていることが分かる。
+
+```sh
+ORIG_VMNAME=ubuntu-orig
+```
+
+そのままだとHDD容量が10GB程度しかないためログインして論理ボリュームを拡張する。
+
+```sh
+sudo virsh console ubuntu-orig
+vgextend ubuntu-vg /dev/sdb
+lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+resize2fs /dev/ubuntu-vg/ubuntu-lv
+```
+
+次のセクションでVMを複製する前に、雛形VMをシャットダウンする必要がある。
+
+```sh
+sudo virsh shutdown ubuntu-orig
 ```
 
 ### クラスタノードVMの複製
