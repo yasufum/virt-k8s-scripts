@@ -78,6 +78,9 @@ sudo virsh net-dhcp-leases default
 ### kubernetesクラスタのセットアップ
 
 複製されたVMのそれぞれにおいて`install-kubeadm.sh`を実行する。
+このスクリプトは
+[ここ](https://gist.githubusercontent.com/rokuosan/cc9a243fb7a2f43ff6bab40b9fc06f98/raw/0f385980be15795c73fa7077db468e4947c6b19b/install.sh)
+を参考に作成。
 
 ```sh
 scp install-kubeadm.sh ${USER}@${IPADDR}:
