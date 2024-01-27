@@ -6,31 +6,34 @@ libvirtを用いた簡易k8s環境構築ツール。
 
 ### 雛形VMの作成
 
-まず`virt-install`により雛形のVMイメージを1つ作成し、
-マルチノード構成とする場合にはさらにこれを複製する。
+まず`virt-install`コマンドを用いて雛形のVMイメージを1つ作成する。
+さらにマルチノード構成にする場合にはこのVMイメージを複製する。
 
-雛形のVMを作成するには`virt-install.sh`を実行する。スペックを変更したい場合は
-`vars.sh`のパラメータを変更する。
+雛形のVMは`virt-install.sh`から作成できる。
+なおスペックは`vars.sh`にて定義されているため、
+変更する場合はこのファイルを編集する。
 
 ```sh
 bash virt-install.sh
 ```
 
-VMが起動されOSインストール画面に移行するため、メニューに従って実行する。
-インストールが完了すると`vars.sh`の`ORIG_VMNAME`で指定した
-名称VMが作成されていることが分かる。
+`virt-install.sh`を実行するとVMが起動されOSインストール画面に移行するので、
+メニューに従って操作を行う。
+インストールが完了すると、`vars.sh`の`ORIG_VMNAME`で定義された
+名称のVMが作成されていることが分かる。
 
 ```sh
 ORIG_VMNAME=ubuntu-orig
 ```
 
-そのままだとHDD容量が10GB程度しかないためログインして論理ボリュームを拡張する。
+なおHDD容量が指定したサイズより小さい場合があるため、
+ログインして論理ボリュームを拡張する。
 
 ```sh
 sudo virsh console ubuntu-orig
-vgextend ubuntu-vg /dev/sdb
-lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
-resize2fs /dev/ubuntu-vg/ubuntu-lv
+sudo vgextend ubuntu-vg /dev/sdb  # 不要の場合もある
+sudo lvextend -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+sudo resize2fs /dev/ubuntu-vg/ubuntu-lv
 ```
 
 次のセクションでVMを複製する前に、雛形VMをシャットダウンする必要がある。
@@ -50,25 +53,32 @@ bash clone-vms.sh
 ```
 
 なお複製されたVMは起動されたときに全て同じIPアドレスを割り当てられてしまうため、
-異なるアドレスとなるように設定を変更する。
-原因はDHCPサーバーが（MACアドレスではなく）`machine-id`に対してIPアドレス割り当てを
+（正しく）異なるアドレスとなるように設定を変更する。
+この原因はDHCPサーバーが（MACアドレスではなく）`machine-id`に対してIPアドレス割り当てを
 行うためであり、
-`virt-clone`コマンドではこの挙動を制御できないため手動での変更が必要。
+`virt-clone`コマンドではこの挙動を制御できないため手動での変更が必要となる。
 
 参考: [libvirtのnetworkでDHCPが同じIPを振り続ける](https://qiita.com/sandopan65/items/75ca7e6563e86a7dfd8c)
 
 VMにログインして以下のコマンドを実行し`machine-id`をクリアした後に再起動すると
 新たに別の`machine-id`にて起動される。
+
+またホスト名も全て同じになっているため`hostnamectl`コマンドにて任意の名前に変更しておく。
+
 sshではログインできないためconsole経由で操作する。
 
 ```sh
 sudo virsh console ${VMNAME}
 sudo bash -c "echo -n > /etc/machine-id"
-sudo reboot
+sudo hostnamectl hostname HOSTNAME
+sudo reboot  # IPアドレスを再設定するため一度再起動する
 ```
 
-全てのVMで作業が完了したらvirshコマンドによりそれぞれのIPアドレスが異なることを確認する。
-`virt-install.sh`で`NW_BRIDGE=virbr0`としている場合、
+全てのVMで作業が完了したら、
+`virsh net-dhcp-leases`コマンドによりそれぞれのノードのIPアドレスが
+異なっていることが確認できる（ただし値が上手く反映されていないこともある）。
+コマンドの最後にネットワーク名を指定する必要があるが、
+`virt-install.sh`で`NW_BRIDGE=virbr0`としている場合
 ネットワーク名は`default`となっている。
 
 ```sh
@@ -77,17 +87,19 @@ sudo virsh net-dhcp-leases default
 
 ### kubernetesクラスタのセットアップ
 
-複製されたVMのそれぞれにおいて`install-kubeadm.sh`を実行する。
-このスクリプトは
+複製されたVMのそれぞれにおいて`install-kubeadm.sh`を実行する
+（このスクリプトは
 [ここ](https://gist.githubusercontent.com/rokuosan/cc9a243fb7a2f43ff6bab40b9fc06f98/raw/0f385980be15795c73fa7077db468e4947c6b19b/install.sh)
-を参考に作成。
+を参考に作成しました）。
 
 ```sh
 scp install-kubeadm.sh ${USER}@${IPADDR}:
 ssh ${USER}@${IPADDR} bash install-kubeadm
 ```
 
-このスクリプト実行が成功すると、`kubeadm init`によるクラスタ構築が可能となる。
+このスクリプト実行が成功すると、
+次に`kubeadm init`によるクラスタ構築が可能となる。
+masterノード、workerノードそれぞれで次の操作を行う。
 
 masterノード:
 
@@ -103,8 +115,8 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
 workerノード:
 
-masterでの`kubeadm init`完了時に出力される以下の様なコマンドを実行し
-クラスタに参加させる。
+masterでの`kubeadm init`完了時に出力されるトークンなどの情報を利用して、
+workerノードで以下のように`kubeadm join`を実行しクラスタに参加させる。
 
 ```sh
 $ sudo kubeadm join 10.10.10.240:6443 --token lu4wng.331v1crmk77ouua2 \
@@ -114,7 +126,7 @@ $ sudo kubeadm join 10.10.10.240:6443 --token lu4wng.331v1crmk77ouua2 \
 
 ### CNIのインストール
 
-ここでは[Cilium]()を用いる。
+ここでは[Cilium](https://cilium.io/)を用いる。
 
 ```sh
 CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
